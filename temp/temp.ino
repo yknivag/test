@@ -11,11 +11,144 @@ const char* fingerprint = "35 85 74 EF 67 35 A7 CE 40 69 50 F3 C0 F6 80 CF 80 3B
 #define GHOTA_HOST "api.github.com"
 #define GHOTA_PORT 443
 #define GHOTA_TIMEOUT 1500
-#define GHOTA_MAX_RELEASES 3
+#define GHOTA_FINGERPRINT "35 85 74 EF 67 35 A7 CE 40 69 50 F3 C0 F6 80 CF 80 3B 2E 19"
+#define GHOTA_CONTENT_TYPE "application/octet-stream"
 
 #define GHOTA_USER "yknivag"
 #define GHOTA_REPO "test"
-#define CURRENT_TAG "0.0.0"
+#define GHOTA_CURRENT_TAG "0.1.0"
+#define GHOTA_BIN_FILE "temp.ino.d1_mini.bin"
+
+#define GHOTA_ACCEPT_PRERELEASE 0
+
+const char* GHOTA_LastError = "";
+const char* GHOTA_UpgradeURL = "";
+
+bool GHOTACheckUpgrade() {
+  GHOTA_LastError = "";
+  GHOTA_UpgradeURL = "";
+  WiFiClientSecure client;
+  if (!client.connect(GHOTA_HOST, GHOTA_PORT)) {
+    GHOTA_LastError = "Connection failed";
+    return false;
+  }
+
+#ifdef GHOTA_FINGERPRINT
+  if (!client.verify(GHOTA_FINGERPRINT, GHOTA_HOST)) {
+    GHOTA_LastError = "Certificate doesn't match";
+    return false;
+  }
+#endif
+
+  String url = "/repos/";
+  url += GHOTA_USER;
+  url += "/";
+  url += GHOTA_REPO;
+  url += "/releases/latest";
+  Serial.print("requesting URL: ");
+  Serial.println(url);
+
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + GHOTA_HOST + "\r\n" +
+               "User-Agent: GitHubOTAUpdateLibraryESP8266\r\n" +
+               "Connection: close\r\n\r\n");
+
+  Serial.println("request sent");
+  while (client.connected()) {
+    String response = client.readStringUntil('\n');
+    if (response == "\r") {
+      Serial.println("headers received");
+      break;
+    }
+  }
+  String response = client.readStringUntil('\n');
+  Serial.println("reply was:");
+  Serial.println("==========");
+  Serial.println(response);
+  Serial.println("==========");
+  Serial.println("closing connection");
+  //client->stop();
+
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& root = jsonBuffer.parseObject(response);
+
+  if (root.success()) {
+    if (root.containsKey("tag_name")) {
+      const char* current_tag = GHOTA_CURRENT_TAG;
+      const char* release_tag = root["tag_name"];
+      const char* release_name = root["name"];
+      const char* release_prerelease = root["prerelease"];
+      Serial.print("Current Tag: ");
+      Serial.println(current_tag);
+      Serial.print("Release Tag: ");
+      Serial.println(release_tag);
+      if (strcmp(release_tag, GHOTA_CURRENT_TAG) != 0) {
+        Serial.println("Interesting Release Found");
+        Serial.println("Release Details");
+        Serial.println("===============");
+        Serial.print("Name and Tag: ");
+        Serial.print(release_name);
+        Serial.print("[");
+        Serial.print(release_tag);
+        Serial.println("]");
+        Serial.print("Pre-release: ");
+        Serial.println(release_prerelease);
+
+        #ifdef GHOTA_ACCEPT_PRERELEASE
+          if (GHOTA_ACCEPT_PRERELEASE == 0 && strcmp(release_prerelease, "true") == 0) {
+            GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not set to 1.";
+            return false;
+          }
+        #else
+          if (strcmp(release_prerelease, "true") == 0) {
+            GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not defined and set to 1.";
+            return false;
+          }
+        #endif
+
+        JsonArray& assets = root["assets"];
+        for (auto& asset : assets) {
+          const char* asset_type = asset["content_type"];
+          const char* asset_name = asset["name"];
+          const char* asset_url = asset["browser_download_url"];
+
+          if (strcmp(asset_type, GHOTA_CONTENT_TYPE) == 0 && strcmp(asset_name, GHOTA_BIN_FILE) == 0) {
+            GHOTA_UpgradeURL = asset_url;
+
+            Serial.println("Valid Asset Found");
+            Serial.println("Asset Details");
+            Serial.println("=============");
+            Serial.print("Type: ");
+            Serial.println(asset_type);
+            Serial.print("Name: ");
+            Serial.println(asset_name);
+            Serial.print("URL: ");
+            Serial.println(asset_url);
+
+            return true;
+          }
+          else {
+            GHOTA_LastError = "No valid binary found for latest release.";
+            return false;
+          }
+        }
+      }
+      else {
+        GHOTA_LastError = "Already running latest release.";
+        return false;
+      }
+    }
+    else {
+      GHOTA_LastError = "JSON didn't match expected structure.";
+      return false;
+    }
+  }
+  else {
+    GHOTA_LastError = "Response does not appear to be JSON.";
+    return false;
+  }
+}
+
 
 //struct assetDetails_t{
 //  long id;
@@ -42,23 +175,7 @@ const char* fingerprint = "35 85 74 EF 67 35 A7 CE 40 69 50 F3 C0 F6 80 CF 80 3B
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   // put your setup code here, to run once:
-//  releases[0].id = 10134966;
-//  releases[0].tag_name = "1.0";
-//  releases[0].name = "Initial Release";
-//  releases[0].url = "https://api.github.com/repos/yknivag/Arduino-Dodow-Clone/releases/10134966";
-//  releases[0].prerelease = false;
-//  releases[0].published_at = "2018-03-17T12:47:26Z";
-//  releases[0].asset_count = 2;
-//  releases[0].assetDetails[0].id = 6820510;
-//  releases[0].assetDetails[0].name = "DowDowATTiny85.ino.tiny8.hex";
-//  releases[0].assetDetails[0].url = "https://api.github.com/repos/yknivag/Arduino-Dodow-Clone/releases/assets/6820510";
-//  releases[0].assetDetails[0].updated_at = "2018-04-12T11:03:53Z";
-//  releases[0].assetDetails[0].browser_download_url = "https://github.com/yknivag/Arduino-Dodow-Clone/releases/download/1.0/DowDowATTiny85.ino.tiny8.hex";
-//  releases[0].assetDetails[1].id = 6820511;
-//  releases[0].assetDetails[1].name = "1DowDowATTiny85.ino.tiny8.hex";
-//  releases[0].assetDetails[1].url = "https://api.github.com/repos/yknivag/Arduino-Dodow-Clone/releases/assets/6820511";
-//  releases[0].assetDetails[1].updated_at = "2018-04-12T11:03:53Z";
-//  releases[0].assetDetails[1].browser_download_url = "https://github.com/yknivag/Arduino-Dodow-Clone/releases/download/1.0/1DowDowATTiny85.ino.tiny8.hex";
+
   Serial.begin(115200);
   Serial.println();
   Serial.print("connecting to ");
@@ -74,56 +191,25 @@ void setup() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Use WiFiClientSecure class to create TLS connection
-  WiFiClientSecure client;
-  Serial.print("connecting to ");
-  Serial.println(GHOTA_HOST);
-  if (!client.connect(GHOTA_HOST, GHOTA_PORT)) {
-    Serial.println("connection failed");
-    return;
+  bool isUpgradeable = GHOTACheckUpgrade();
+
+  if (isUpgradeable) {
+    Serial.print("Upgrade URL: ");
+    Serial.println(GHOTA_UpgradeURL);
   }
-
-  if (client.verify(fingerprint, GHOTA_HOST)) {
-    Serial.println("certificate matches");
-  } else {
-    Serial.println("certificate doesn't match");
-  }
-
-  String url = "/repos/esp8266/Arduino/commits/master/status";
-  Serial.print("requesting URL: ");
-  Serial.println(url);
-
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-               "Host: " + GHOTA_HOST + "\r\n" +
-               "User-Agent: BuildFailureDetectorESP8266\r\n" +
-               "Connection: close\r\n\r\n");
-
-  Serial.println("request sent");
-  while (client.connected()) {
-    String line = client.readStringUntil('\n');
-    if (line == "\r") {
-      Serial.println("headers received");
-      break;
+  else {
+    Serial.println("No upgrade available.");
+    if (strcmp(GHOTA_LastError, "")) {
+      Serial.print("GHOTA Response: ");
+      Serial.println(GHOTA_LastError);
     }
   }
-  String line = client.readStringUntil('\n');
-  if (line.startsWith("{\"state\":\"success\"")) {
-    Serial.println("esp8266/Arduino CI successfull!");
-  } else {
-    Serial.println("esp8266/Arduino CI has failed");
-  }
-  Serial.println("reply was:");
-  Serial.println("==========");
-  Serial.println(line);
-  Serial.println("==========");
-  Serial.println("closing connection");
-
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
-  delay(1000);                       // wait for a second
+  delay(1800);                       // wait for a second
   digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
-  delay(1000);  
+  delay(200);
 }
