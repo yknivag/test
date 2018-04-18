@@ -16,10 +16,15 @@ const char* fingerprint = "35 85 74 EF 67 35 A7 CE 40 69 50 F3 C0 F6 80 CF 80 3B
 
 #define GHOTA_USER "yknivag"
 #define GHOTA_REPO "test"
-#define GHOTA_CURRENT_TAG "0.1.0"
+#define GHOTA_CURRENT_TAG "0.0.0"
 #define GHOTA_BIN_FILE "temp.ino.d1_mini.bin"
 
 #define GHOTA_ACCEPT_PRERELEASE 0
+
+
+
+#define DEBUG_ESP_HTTP_UPDATE true
+#define DEBUG_ESP_PORT Serial
 
 const char* GHOTA_LastError = "";
 const char* GHOTA_UpgradeURL = "";
@@ -94,17 +99,17 @@ bool GHOTACheckUpgrade() {
         Serial.print("Pre-release: ");
         Serial.println(release_prerelease);
 
-        #ifdef GHOTA_ACCEPT_PRERELEASE
-          if (GHOTA_ACCEPT_PRERELEASE == 0 && strcmp(release_prerelease, "true") == 0) {
-            GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not set to 1.";
-            return false;
-          }
-        #else
-          if (strcmp(release_prerelease, "true") == 0) {
-            GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not defined and set to 1.";
-            return false;
-          }
-        #endif
+#ifdef GHOTA_ACCEPT_PRERELEASE
+        if (GHOTA_ACCEPT_PRERELEASE == 0 && strcmp(release_prerelease, "true") == 0) {
+          GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not set to 1.";
+          return false;
+        }
+#else
+        if (strcmp(release_prerelease, "true") == 0) {
+          GHOTA_LastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is not defined and set to 1.";
+          return false;
+        }
+#endif
 
         JsonArray& assets = root["assets"];
         for (auto& asset : assets) {
@@ -149,28 +154,115 @@ bool GHOTACheckUpgrade() {
   }
 }
 
+typedef struct urlDetails_t {
+  String proto;
+  String host;
+  String path;
+  String url;
+};
 
-//struct assetDetails_t{
-//  long id;
-//  char* name;
-//  char* url;
-//  char* updated_at;
-//  char* browser_download_url;
-//};
-//
-//struct releaseDetails_t{
-//  long id;
-//  char* tag_name;
-//  char* name;
-//  char* url;
-//  bool prerelease;
-//  char* published_at;
-//  int asset_count;
-//  char* assets_url;
-//  assetDetails_t assetDetails[];
-//};
-//
-//releaseDetails_t releases[GHOTA_MAX_RELEASES];
+struct urlDetails_t urlDetails(String url) {
+  String proto = "";
+  if (url.startsWith("http://")) {
+    proto = "http://";
+    url.replace("http://", "");
+  }
+  else {
+    proto = "https://";
+    url.replace("https://", "");
+  }
+  int firstSlash = url.indexOf('/');
+  String host = url.substring(0, firstSlash);
+  String path = url.substring(firstSlash);
+
+  urlDetails_t urlDetail;
+
+  urlDetail.proto = proto;
+  urlDetail.host = host;
+  urlDetail.path = path;
+  urlDetail.url = proto + host + path;
+
+  return urlDetail;
+}
+
+String getFinalURL(String url) {
+  struct urlDetails_t splitURL = urlDetails(url);
+  String proto = splitURL.proto;
+  String host = splitURL.host;
+  String path = splitURL.path;
+  int port = 80;
+  if (proto.startsWith("https")) {
+    port = 443;
+  }
+  bool isFinalURL = false;
+  //
+  //  WiFiClientSecure client;
+  //
+  //  while (!isFinalURL) {
+  //    Serial.print("Connecting to ");
+  //    Serial.println(host);
+  //    if (!client.connect(host, port)) {
+  //      Serial.println("connection failed");
+  //      return;
+  //    }
+  //
+  //    //    if (client.verify(GHOTA_FINGERPRINT, GHOTA_HOST)) {
+  //    //      Serial.println("certificate matches");
+  //    //    } else {
+  //    //      Serial.println("certificate doesn't match");
+  //    //      return;
+  //    //    }
+  //
+  //    client.print(String("GET ") + path + " HTTP/1.1\r\n" +
+  //                 "Host: " + host + "\r\n" +
+  //                 "User-Agent: GitHubOTAUpdateLibraryESP8266\r\n" +
+  //                 "Connection: close\r\n\r\n");
+  //
+  //    Serial.println("request sent");
+  //
+  //    while (client.connected()) {
+  //      String response = client.readStringUntil('\n');
+  //      if (response.startsWith("Location: ")) {
+  //        String location = response;
+  //        location.replace("Location: ", "");
+  //
+  //        Serial.println();
+  //        Serial.print("Location: ");
+  //        Serial.println(location);
+  //        Serial.println();
+  //
+  //        if (location.startsWith("http://") || location.startsWith("https://")) {
+  //          //absolute URL - separate host from path
+  //          urlDetails_t url = urlDetails(location);
+  //          proto = url.proto;
+  //          host = url.host;
+  //          path = url.path;
+  //          if (strcmp(proto, "https://") == 0) {
+  //            port = 443;
+  //          }
+  //          else {
+  //            port = 80;
+  //          }
+  //        }
+  //        else {
+  //          path = location;
+  //        }
+  //      }
+  //      else {
+  //        isFinalURL = true;
+  //      }
+  //      if (response == "\r") {
+  //        Serial.println("headers received");
+  //        break;
+  //      }
+  //    }
+  //  }
+
+  String finalURL = proto + host + path;
+
+  return finalURL;
+}
+
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -191,11 +283,105 @@ void setup() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
-  bool isUpgradeable = GHOTACheckUpgrade();
+  //bool isUpgradeable = GHOTACheckUpgrade();
+  bool isUpgradeable = true;
 
   if (isUpgradeable) {
     Serial.print("Upgrade URL: ");
     Serial.println(GHOTA_UpgradeURL);
+
+    String GHOTA_FinalURL = getFinalURL(GHOTA_UpgradeURL);
+    Serial.print("Final Upgrade URL: ");
+    Serial.println(GHOTA_FinalURL);
+
+
+    //    WiFiClientSecure client;
+    //    Serial.print("connecting to ");
+    //    Serial.println("github.com");
+    //    if (!client.connect("github.com", GHOTA_PORT)) {
+    //      Serial.println("connection failed");
+    //      return;
+    //    }
+    //
+    //    //    if (client.verify(GHOTA_FINGERPRINT, GHOTA_HOST)) {
+    //    //      Serial.println("certificate matches");
+    //    //    } else {
+    //    //      Serial.println("certificate doesn't match");
+    //    //      return;
+    //    //    }
+    //
+    //    client.print(String("GET ") + "/yknivag/test/releases/download/0.1.0/temp.ino.d1_mini.bin" + " HTTP/1.1\r\n" +
+    //                 "Host: " + "github.com" + "\r\n" +
+    //                 "User-Agent: GitHubOTAUpdateLibraryESP8266\r\n" +
+    //                 "Connection: close\r\n\r\n");
+    //
+    //    Serial.println("request sent");
+    //    String new_host = "github.com";
+    //    String new_path = "/yknivag/test/releases/download/0.1.0/temp.ino.d1_mini.bin";
+    //    while (client.connected()) {
+    //
+    //      String response = client.readStringUntil('\n');
+    //      if (response.startsWith("Location: ")) {
+    //        String location = response;
+    //        location.replace("Location: ", "");
+    //
+    //        Serial.println();
+    //        Serial.print("Location: ");
+    //        Serial.println(location);
+    //        Serial.println();
+    //        if (location.startsWith("http://") || location.startsWith("https://")) {
+    //          //absolute URL - separate host from path
+    //          urlDetails_t url = urlDetails(location);
+    //          new_host = url.host;
+    //          new_path = url.path;
+    //          //        if (location.startsWith("http://")) {
+    //          //          location.replace("http://", "");
+    //          //        }
+    //          //        else {
+    //          //          location.replace("https://", "");
+    //          //        }
+    //          //        int firstSlash = location.indexOf('/');
+    //          //        new_host = location.substring(0, firstSlash);
+    //          //        new_path = location.substring(firstSlash);
+    //        }
+    //        else {
+    //          new_path = location;
+    //        }
+    //      }
+    //      if (response == "\r") {
+    //        Serial.println("headers received");
+    //
+    //        break;
+    //      }
+    //    }
+    //    Serial.println("closing connection");
+    //    Serial.println();
+    //    Serial.print("New Host: ");
+    //    Serial.println(new_host);
+    //    Serial.print("New Path: ");
+    //    Serial.println(new_path);
+    //    Serial.println();
+    //
+    //    //    Serial.print("Starting OTA from: ");
+    //    //    Serial.println(GHOTA_UpgradeURL);
+
+    //t_httpUpdate_return ret = ESPhttpUpdate.update(client, GHOTA_HOST, GHOTA_UpgradeURL);
+    //t_httpUpdate_return ret = ESPhttpUpdate.update("github.com", 443, "https://github.com/yknivag/test/releases/download/0.1.0/temp.ino.d1_mini.bin");
+
+    //      switch(ret) {
+    //        case HTTP_UPDATE_FAILED:
+    //          Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+    //          break;
+    //
+    //        case HTTP_UPDATE_NO_UPDATES:
+    //          Serial.println("HTTP_UPDATE_NO_UPDATES");
+    //          break;
+    //
+    //        case HTTP_UPDATE_OK:
+    //          Serial.println("HTTP_UPDATE_OK");
+    //          break;
+    //      }
+
   }
   else {
     Serial.println("No upgrade available.");
@@ -204,10 +390,13 @@ void setup() {
       Serial.println(GHOTA_LastError);
     }
   }
+
+
+
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  //put your main code here, to run repeatedly:
   digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
   delay(1800);                       // wait for a second
   digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
